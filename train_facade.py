@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-# python train_facade.py -g 0 -i ./facade/base --out result_facade --snapshot_interval 10000
 
 from __future__ import print_function
 import argparse
 import os
+import sys
 
 import chainer
 from chainer import training
@@ -16,40 +16,85 @@ from net import Encoder
 from net import Decoder
 from updater import FacadeUpdater
 
-from facade_dataset import FacadeDataset
-from facade_visualizer import out_image
+import data
+
+# from facade_dataset import FacadeDataset
+# from facade_visualizer import out_image
 
 def main():
     parser = argparse.ArgumentParser(description='chainer implementation of pix2pix')
-    parser.add_argument('--batchsize', '-b', type=int, default=1,
-                        help='Number of images in each mini-batch')
-    parser.add_argument('--epoch', '-e', type=int, default=200,
-                        help='Number of sweeps over the dataset to train')
-    parser.add_argument('--gpu', '-g', type=int, default=-1,
-                        help='GPU ID (negative value indicates CPU)')
-    parser.add_argument('--dataset', '-i', default='./facade/base',
-                        help='Directory of image files.')
-    parser.add_argument('--out', '-o', default='result',
-                        help='Directory to output the result')
-    parser.add_argument('--resume', '-r', default='',
-                        help='Resume the training from snapshot')
+
+
+    parser.add_argument("database", type = str, 
+        help = "Path for database")
+
+    parser.add_argument("--rot", "-r", type = bool, default = False,
+        help = "Include rotations for images -> *")
+
+    parser.add_argument("--voxels", "-v", type = int, default = 64,
+        help = "Number of voxels (default 64)")
+
+    parser.add_argument("--image", "-is", type = int, default = 256,
+        help = "Size of images. Default(256)")
+
+    parser.add_argument('--batchsize', '-b', type=int, default=10,
+        help='Number of samples in each mini-batch')
+
+    parser.add_argument('--epoch', '-e', type=int, default=50,
+        help='Number of sweeps over the dataset to train')
+
+    parser.add_argument('--ratio', '-p', type=float, default=0.90,
+        help='Ratio for splitting training and test data (Default: 0.90)')
+
     parser.add_argument('--seed', type=int, default=0,
-                        help='Random seed')
+        help='Random seed')
+
     parser.add_argument('--snapshot_interval', type=int, default=1000,
-                        help='Interval of snapshot')
-    parser.add_argument('--display_interval', type=int, default=100,
-                        help='Interval of displaying log to console')
+        help='Interval of snapshot')
+
+    parser.add_argument('--display_interval', type=int, default=1,
+        help='Interval of displaying log to console')
+
+    parser.add_argument('--out', '-o', type = str, default=os.path.join(os.getcwd(), "nn_logs"),
+        help='Directory to output the result')
+
+    parser.add_argument("--resume", "-re", type = str,
+        help = "Path to load network and resume training")
+
+    parser.add_argument('--gpu', '-g', type=int, default=-1,
+        help='GPU ID (negative value indicates CPU)')
+
+    parser.add_argument('--loaderjob', '-j', type=int, default=2,
+        help='Number of parallel data loading processes')
+
+    parser.add_argument('--example_count', '-ec', type=int, default=10,
+        help='Number of samples per object')
+
+    parser.add_argument('--synset_list', '-syn', type = str,
+        help = "Path to synset list")
+
+    parser.add_argument('--synset_id', '-sid', type = int,
+        help = "Index of synset")
+
     args = parser.parse_args()
 
-    print('GPU: {}'.format(args.gpu))
-    print('# Minibatch-size: {}'.format(args.batchsize))
-    print('# epoch: {}'.format(args.epoch))
-    print('')
+    print("################################")
+    print("Saving network to: {}".format(args.out))
+    print("##### Data #####")
+    print("Using database: {}".format(args.database))
+    print("Voxels : {0:d}x{0:d}x{0:d}".format(args.voxels))
+    print("Image size : 1x{0:d}x{0:d}".format(args.image))
+        
+    print("##### Training #####")
+    print("Batchsize : {}".format(args.batchsize))
+    print("Epochs : {}".format(args.epoch))
+    print("################################")
+    sys.stdout.flush()
 
     # Set up a neural network to train
-    enc = Encoder(in_ch=12)
+    enc = Encoder(in_ch=1)
     dec = Decoder(out_ch=3)
-    dis = Discriminator(in_ch=12, out_ch=3)
+    dis = Discriminator(in_ch=1, out_ch=3)
     
     if args.gpu >= 0:
         chainer.cuda.get_device(args.gpu).use()  # Make a specified GPU current
@@ -67,12 +112,24 @@ def main():
     opt_dec = make_optimizer(dec)
     opt_dis = make_optimizer(dis)
 
-    train_d = FacadeDataset(args.dataset, data_range=(1,300))
-    test_d = FacadeDataset(args.dataset, data_range=(300,379))
-    #train_iter = chainer.iterators.MultiprocessIterator(train_d, args.batchsize, n_processes=4)
-    #test_iter = chainer.iterators.MultiprocessIterator(test_d, args.batchsize, n_processes=4)
-    train_iter = chainer.iterators.SerialIterator(train_d, args.batchsize)
-    test_iter = chainer.iterators.SerialIterator(test_d, args.batchsize)
+    if args.synset_list is not None:
+        assert(args.synset_id is not None)
+        syn = (args.synset_list, args.synset_id)
+    else:
+        syn = None
+
+    dataset = data.CrossModalDataset(
+        args.database, "images", "voxels", in_size=args.example_count, rot=args.rot, 
+        image_size = (args.image, args.image), synset = syn
+    )    
+        
+    train_size = int(len(dataset)*args.ratio)
+    print("DATASET SIZE: {}".format(len(dataset)))
+
+    train_d, test_d = chainer.datasets.split_dataset_random(dataset, train_size)
+    train_iter = chainer.iterators.MultiprocessIterator(train_d, args.batchsize, n_processes=args.loaderjob)
+    test_iter = chainer.iterators.MultiprocessIterator(test_d, args.batchsize, n_processes=args.loaderjob)
+
 
     # Set up a trainer
     updater = FacadeUpdater(
@@ -102,11 +159,6 @@ def main():
         'epoch', 'iteration', 'enc/loss', 'dec/loss', 'dis/loss',
     ]), trigger=display_interval)
     trainer.extend(extensions.ProgressBar(update_interval=10))
-    trainer.extend(
-        out_image(
-            updater, enc, dec,
-            5, 5, args.seed, args.out),
-        trigger=snapshot_interval)
 
     if args.resume:
         # Resume from a snapshot

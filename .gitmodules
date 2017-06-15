@@ -1,0 +1,3 @@
+[submodule "binvox-rw-py"]
+	path = binvox-rw-py
+	url = https://github.com/belledon/binvox-rw-py.git
