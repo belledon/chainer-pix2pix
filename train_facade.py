@@ -11,15 +11,15 @@ from chainer import training
 from chainer.training import extensions
 from chainer import serializers
 
-from net import Discriminator
-from net import Encoder
-from net import Decoder
+
 from updater import FacadeUpdater
 
 import data
+import net
 
-# from facade_dataset import FacadeDataset
-# from facade_visualizer import out_image
+archs = {   "pix-pix" : net.pixtopix,
+            "pix-voxel" : net.pixtovoxel,}
+
 
 def main():
     parser = argparse.ArgumentParser(description='chainer implementation of pix2pix')
@@ -27,6 +27,9 @@ def main():
 
     parser.add_argument("database", type = str, 
         help = "Path for database")
+
+    parser.add_argument("arch", type = str, choices = archs.keys(),
+        help = "Network Architecture")
 
     parser.add_argument("--rot", "-r", type = bool, default = False,
         help = "Include rotations for images -> *")
@@ -49,7 +52,7 @@ def main():
     parser.add_argument('--seed', type=int, default=0,
         help='Random seed')
 
-    parser.add_argument('--snapshot_interval', type=int, default=1000,
+    parser.add_argument('--snapshot_interval', type=int, default=10,
         help='Interval of snapshot')
 
     parser.add_argument('--display_interval', type=int, default=1,
@@ -92,9 +95,20 @@ def main():
     sys.stdout.flush()
 
     # Set up a neural network to train
-    enc = Encoder(in_ch=1)
-    dec = Decoder(out_ch=3)
-    dis = Discriminator(in_ch=1, out_ch=3)
+
+    arch = archs[args.arch]
+    enc = arch.Encoder()
+    dec = arch.Decoder()
+    dis = arch.Discriminator()
+
+    if args.resume:
+        # Resume from a snapshot
+        chainer.serializers.load_npz(args.resume, enc)
+
+        f_name = lambda m: ff.join(args.out, "{}_iter_{}.npz".format(m,args.iter))
+        serializers.npz.load_npz(f_name("enc"), enc)
+        serializers.npz.load_npz(f_name("dec"), dec)
+        serializers.npz.load_npz(f_name("dis"), dis)
     
     if args.gpu >= 0:
         chainer.cuda.get_device(args.gpu).use()  # Make a specified GPU current
@@ -103,14 +117,14 @@ def main():
         dis.to_gpu()
 
     # Setup an optimizer
-    def make_optimizer(model, alpha=0.0002, beta1=0.5):
+    def make_optimizer(model, alpha=0.000002, beta1=0.5):
         optimizer = chainer.optimizers.Adam(alpha=alpha, beta1=beta1)
         optimizer.setup(model)
-        optimizer.add_hook(chainer.optimizer.WeightDecay(0.00001), 'hook_dec')
+        optimizer.add_hook(chainer.optimizer.WeightDecay(0.000001), 'hook_dec')
         return optimizer
-    opt_enc = make_optimizer(enc)
-    opt_dec = make_optimizer(dec)
-    opt_dis = make_optimizer(dis)
+    opt_enc = make_optimizer(enc, alpha = 2.0e-5)
+    opt_dec = make_optimizer(dec, alpha = 2.0e-5)
+    opt_dis = make_optimizer(dis, alpha = 1.0e-5)
 
     if args.synset_list is not None:
         assert(args.synset_id is not None)
@@ -145,9 +159,9 @@ def main():
 
     snapshot_interval = (args.snapshot_interval, 'iteration')
     display_interval = (args.display_interval, 'iteration')
-    trainer.extend(extensions.snapshot(
-        filename='snapshot_iter_{.updater.iteration}.npz'),
-                   trigger=snapshot_interval)
+    # trainer.extend(extensions.snapshot(
+    #     filename='snapshot_iter_{.updater.iteration}.npz'),
+    #                trigger=snapshot_interval)
     trainer.extend(extensions.snapshot_object(
         enc, 'enc_iter_{.updater.iteration}.npz'), trigger=snapshot_interval)
     trainer.extend(extensions.snapshot_object(
@@ -160,9 +174,7 @@ def main():
     ]), trigger=display_interval)
     trainer.extend(extensions.ProgressBar(update_interval=10))
 
-    if args.resume:
-        # Resume from a snapshot
-        chainer.serializers.load_npz(args.resume, trainer)
+    
 
     # Run the training
     trainer.run()

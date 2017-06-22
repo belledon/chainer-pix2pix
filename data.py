@@ -70,13 +70,13 @@ class CrossModalDataset(DatasetMixin):
 	# 
 	# 
 	in_types = ["images", "grasps", "multisensory"]
-	out_types = ["id", "voxels", "all"]
+	out_types = ["id", "voxels",  "all"]
 	grasp_max = 8
 
 	def __init__(self, path, in_type, out_type, 
 		rot = False,  grasp_count = 6,
-		in_size = 10, image_size = (107, 107), synset = None,
-		debug = True):
+		in_size = 10, image_size = (256, 256), synset = None,
+		debug = False, test = False):
 
 		assert(in_type in CrossModalDataset.in_types and
 			out_type in CrossModalDataset.out_types)
@@ -89,6 +89,7 @@ class CrossModalDataset(DatasetMixin):
 		self.grasp_count = grasp_count
 		self.image_size = image_size
 		self.synset = synset
+		self.test = test
 		self._initialize(path)
 		
 	def __len__(self):
@@ -126,11 +127,10 @@ class CrossModalDataset(DatasetMixin):
 		if ff.isFile(image_mean):
 			self.means = True
 
-			self.image_mean = np.load(image_mean)
-			self.image_mean = zoom(self.image_mean, (1., self.image_size[0]/107., self.image_size[0]/107.))
-
-			
-				
+			image_mean = np.load(image_mean).squeeze()
+			image_mean = Image.fromarray(image_mean).resize((self.image_size))
+			self.image_mean = np.asarray(image_mean)
+		
 		else:
 			self.means = False
 			self.image_mean = 0.0
@@ -309,12 +309,14 @@ class CrossModalDataset(DatasetMixin):
 			image = np.asarray(f, dtype=np.float32)
 		
 		image = image[:,:,0:3]
-		image = np.rollaxis(image, 2, 0)
+		image = np.mean(image, axis = 2)
 
-		image *= (1.0 / 255.0)
-		image -= self.image_mean
+		if not self.test:
+
+			image *= (1.0 / 255.0)
+			image -= self.image_mean
 		
-		image = np.mean(image, axis = 0)
+		
 		image = np.expand_dims(image, axis = 0)
 
 		# print(image.shape)
@@ -354,9 +356,9 @@ class CrossModalDataset(DatasetMixin):
 		if isinstance(voxels, bytes):
 			voxels = loadBinvox(voxels).data
 		
-		if self.rot:
-			rot = self.get_rot(i)
-			voxels = rotate_matrix(voxels, rot)
+		# if self.rot:
+		# 	rot = self.get_rot(i)
+		# 	voxels = rotate_matrix(voxels, rot)
 
 		# for tanh
 		voxels = voxels.astype(np.float32)

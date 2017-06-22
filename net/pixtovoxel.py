@@ -41,7 +41,7 @@ class CBR(chainer.Chain):
         return h
     
 class Encoder(chainer.Chain):
-    def __init__(self, in_ch):
+    def __init__(self, in_ch=1):
         layers = {}
         w = chainer.initializers.Normal(0.02)
         layers['c0'] = L.Convolution2D(in_ch, 64, 3, 1, 1, initialW=w)
@@ -68,10 +68,10 @@ class Encoder(chainer.Chain):
             # print("At layer {}".format(i))
             h = self['c{0:d}'.format(i)](h)
             # print(h.debug_print())
-        return h
+        return F.leaky_relu(h)
 
 class Decoder(chainer.Chain):
-    def __init__(self, out_ch):
+    def __init__(self, out_ch=1):
         layers = {}
         w = chainer.initializers.Normal(0.02)
         layers['c0'] = CBR(256, 256, bn=True, sample='up', activation=F.relu, dropout=True)
@@ -96,17 +96,18 @@ class Decoder(chainer.Chain):
         for i in range(1,8):
             
             h = self['c{0:d}'.format(i)](h)
-            if i <= 6:
+            if i == 6:
                 h = F.relu(h)
             # print("At layer {}".format(i))
-            # print(h.debug_print())
+        
+        # print(h.debug_print())
             
-            
-        return h
+        
+        return F.sigmoid(h)
 
     
 class Discriminator(chainer.Chain):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch=1, out_ch=1):
         layers = {}
         w = chainer.initializers.Normal(0.02)
         layers['c0_i'] = L.Convolution2D(in_ch, 32, 10, 8, 1, initialW=w)
@@ -114,7 +115,8 @@ class Discriminator(chainer.Chain):
         layers['c1'] = CBR(2, 64, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c2'] = CBR(64, 256, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c3'] = CBR(256, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
-        layers['c4'] = L.ConvolutionND(3, 512, 1, 4, 2, 1, initialW=w)
+        layers['c4'] = CBR(512, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
+        layers['c5'] = L.ConvolutionND(3, 512, 1, 4, 2, 1, initialW=w)
         super(Discriminator, self).__init__(**layers)
 
     def __call__(self, x_0, x_1):
@@ -127,5 +129,6 @@ class Discriminator(chainer.Chain):
         h = self.c2(h)
         h = self.c3(h)
         h = self.c4(h)
+        h = self.c5(h)
         
         return h
