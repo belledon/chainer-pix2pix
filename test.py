@@ -12,16 +12,14 @@ from chainer import training
 from chainer.training import extensions
 from chainer import serializers
 
-
-from updater import FacadeUpdater
-
 import fileFuncs as ff
 import data
 import net
 
-archs = {   "pix-pix" : net.pixtopix,
-            "pix-voxel" : net.pixtovoxel,}
 
+archs = {   "voxel-voxel" : net.voxeltovoxel,
+            "pix-voxel" : net.pixtovoxel,
+        }
 
 def iou(a, b):
    
@@ -37,7 +35,8 @@ def predict(obs, thresh):
     result = obs.data
     t = np.zeros(result.shape)
     t[np.where(result >= thresh)] = 1
-    print(result.sum())
+    print("RECON MEAN: {}".format(result.mean()))
+    print("Recon contains {} voxels".format(t.sum()))
     return t
 
 def probe(model, data, thresh):
@@ -45,14 +44,16 @@ def probe(model, data, thresh):
     enc, dec  = model 
 
     x,t = data 
-    
+    print("T MEAN: {}".format(t.mean()))
     xp = enc.xp
-    x = xp.expand_dims(x, axis=0)
-    with chainer.using_config('train', False):
-        recon = dec(enc(x))
-        prediction = predict(recon, thresh)
-       
+    x = chainer.Variable(xp.expand_dims(x, axis=0))
+    # with chainer.using_config('train', False):
+    #     recon = dec(enc(x))
+    #     prediction = predict(recon, thresh)
+    recon = dec(enc(x))
+    prediction = predict(recon, thresh)
 
+    print(iou(prediction, t))
     return prediction
 
 
@@ -76,7 +77,7 @@ def main():
     parser.add_argument("--check_dataset", "-cd", type = int, default = 1,
         help = "Returns input, ground truth used for testing")
 
-    parser.add_argument("--rot", "-r", type = bool, default = False,
+    parser.add_argument("--rot", "-r", type = int, default = 0,
         help = "Include rotations for images -> *")
 
     parser.add_argument("--voxels", "-v", type = int, default = 64,
@@ -105,7 +106,7 @@ def main():
     args = parser.parse_args()
 
     print("################################")
-    print("Saving network to: {}".format(args.out))
+    print("Load network from: {}".format(args.out))
     print("##### Data #####")
     print("Using database: {}".format(args.database))
     print("Voxels : {0:d}x{0:d}x{0:d}".format(args.voxels))

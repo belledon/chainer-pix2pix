@@ -107,7 +107,17 @@ def main():
 			x = np.load(x_in).squeeze()
 
 			tout = ff.join(args.out, "gt_{}.png".format(i))
-			save_voxels(tout, t)
+
+			if t.ndim == 3:
+				save_voxels(tout, t)
+				
+			else:
+				t_gt = t[0]
+				t_d = t[1]
+				save_voxels(tout, t_gt)
+
+				d_out = ff.join(args.out, "d_{}.png".format(i))
+				save_voxels(d_out, t_d)
 			
 		
 			iout = ff.join(args.out, "x_{}.png".format(i))

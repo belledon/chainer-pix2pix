@@ -111,17 +111,21 @@ class Discriminator(chainer.Chain):
     def __init__(self, in_ch=1, out_ch=1):
         layers = {}
         w = chainer.initializers.Normal(0.02)
-        layers['c0'] = L.ConvolutionND(3, in_ch, 64, 4, 2, 1, initialW=w)
-        layers['c1'] = CBR(64, 128, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
+        layers['c0_i'] = L.ConvolutionND(3, in_ch, 64, 4, 2, 1, initialW=w)
+        layers['c0_c'] = L.ConvolutionND(3, in_ch, 64, 4, 2, 1, initialW=w)
+        layers['c1'] = CBR(128, 128, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c2'] = CBR(128, 256, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c3'] = CBR(256, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c4'] = CBR(512, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
         layers['c5'] = L.ConvolutionND(3, 512, 1, 4, 2, 1, initialW=w)
         super(Discriminator, self).__init__(**layers)
 
-    def __call__(self, x):
+    def __call__(self, x, c):
 
-        h = F.leaky_relu(self.c0(x))
+        h_i = F.leaky_relu(self.c0_i(x))
+        h_c = F.leaky_relu(self.c0_c(c))
+        h = F.concat([h_i, h_c])
+        
         h = self.c1(h)
         h = self.c2(h)
         h = self.c3(h)
@@ -130,30 +134,3 @@ class Discriminator(chainer.Chain):
         
         return h
 
-# No longer using conditional discriminator 
-# class Discriminator(chainer.Chain):
-#     def __init__(self, in_ch=1, out_ch=1):
-#         layers = {}
-#         w = chainer.initializers.Normal(0.02)
-#         layers['c0_i'] = L.Convolution2D(in_ch, 32, 10, 8, 1, initialW=w)
-#         layers['c0_v'] = L.ConvolutionND(3, in_ch, 1, 4, 2, 1, initialW=w)
-#         layers['c1'] = CBR(2, 64, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
-#         layers['c2'] = CBR(64, 256, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
-#         layers['c3'] = CBR(256, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
-#         layers['c4'] = CBR(512, 512, bn=True, sample='dis', activation=F.leaky_relu, dropout=False)
-#         layers['c5'] = L.ConvolutionND(3, 512, 1, 4, 2, 1, initialW=w)
-#         super(Discriminator, self).__init__(**layers)
-
-#     def __call__(self, x_0, x_1):
-
-#         h_i = F.expand_dims(F.leaky_relu(self.c0_i(x_0)), axis=1)
-#         h_v = F.leaky_relu(self.c0_v(x_1))        
-
-#         h = F.concat([h_i, h_v])
-#         h = self.c1(h)
-#         h = self.c2(h)
-#         h = self.c3(h)
-#         h = self.c4(h)
-#         h = self.c5(h)
-        
-#         return h

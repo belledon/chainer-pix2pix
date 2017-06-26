@@ -76,7 +76,7 @@ class CrossModalDataset(DatasetMixin):
 	def __init__(self, path, in_type, out_type, 
 		rot = False,  grasp_count = 6,
 		in_size = 10, image_size = (256, 256), synset = None,
-		debug = False, test = False):
+		debug = False, test = False, cgan = False):
 
 		assert(in_type in CrossModalDataset.in_types and
 			out_type in CrossModalDataset.out_types)
@@ -90,6 +90,7 @@ class CrossModalDataset(DatasetMixin):
 		self.image_size = image_size
 		self.synset = synset
 		self.test = test
+		self.cgan = cgan
 		self._initialize(path)
 		
 	def __len__(self):
@@ -311,10 +312,10 @@ class CrossModalDataset(DatasetMixin):
 		image = image[:,:,0:3]
 		image = np.mean(image, axis = 2)
 
-		if not self.test:
+		# if not self.test:
 
-			image *= (1.0 / 255.0)
-			image -= self.image_mean
+			# image *= (1.0 / 255.0)
+			# image -= self.image_mean
 		
 		
 		image = np.expand_dims(image, axis = 0)
@@ -328,8 +329,6 @@ class CrossModalDataset(DatasetMixin):
 	def get_rot(self, i):
 		rots = self.get_data(i, "rotations")
 		rots = quat(*rots)
-		# rots -= self.rot_mean
-		# rots *= 1 / np.pi
 		return rots.astype(np.float32)
 
 	def get_grasp(self, i):
@@ -352,17 +351,32 @@ class CrossModalDataset(DatasetMixin):
 		# t0 = clock()
 		obj, _ = self.get_ind(i)
 		voxels = self.data[obj]["voxels"]
-
 		if isinstance(voxels, bytes):
 			voxels = loadBinvox(voxels).data
-		
-		# if self.rot:
-		# 	rot = self.get_rot(i)
-		# 	voxels = rotate_matrix(voxels, rot)
 
-		# for tanh
-		voxels = voxels.astype(np.float32)
+		voxels = voxels.astype(np.bool_)
+
+
+		
+		if self.rot:
+			rot = self.get_rot(i)
+			rot_voxels = rotate_matrix(voxels, rot)
+
 		voxels = np.expand_dims(voxels, axis = 0)
+
+		if self.cgan:
+
+			if self.rot:
+				rot_voxels = np.expand_dims(rot_voxels, axis = 0)
+				voxels = np.concatenate((rot_voxels, voxels), axis=0)
+			else:
+				voxels = np.concatenate((voxels, voxels), axis=0)
+
+		else:
+			if self.rot:
+				voxels = rot_voxels
+		
+
 		# return voxels.astype(np.int32)
 		return voxels
 
