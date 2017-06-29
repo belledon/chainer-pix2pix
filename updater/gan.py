@@ -14,35 +14,27 @@ from chainer import function
 from chainer.utils import type_check
 
 
-class FacadeUpdater(chainer.training.StandardUpdater):
+class Updater(chainer.training.StandardUpdater):
 
     def __init__(self, *args, **kwargs):
         self.enc, self.dec, self.dis = kwargs.pop('models')
         self.iteration = kwargs.pop('iteration')
         self.lams = kwargs.pop('lams')
-        super(FacadeUpdater, self).__init__(*args, **kwargs)
+        super(Updater, self).__init__(*args, **kwargs)
 
 
-    def loss_enc(self, enc, x_out, t_out, y_out):
+    def loss_gen(self, opt, x_out, t_out, y_out):
         xp = cuda.get_array_module(x_out)
         lam1, lam2 = self.lams
         norm = np.prod(y_out.data.shape)
         # print(x_out.debug_print())
         print("MEAN_Z > 0.5: {}".format(
             xp.sum(x_out.data > 0.5)/ np.prod(x_out.data.shape)))
+        print("MAX_Z ALL: {}".format(x_out.data.max()))
         loss_rec = lam1*(F.mean_absolute_error(x_out, t_out))
         loss_adv = lam2*F.sum(F.softplus(-y_out)) / norm
-        loss = loss_rec + loss_adv
-        chainer.report({'loss': loss}, enc)
-        return loss
-        
-    def loss_dec(self, dec, x_out, t_out, y_out):
-        norm = np.prod(y_out.data.shape)
-        lam1, lam2 = self.lams
-        loss_rec = lam1*(F.mean_absolute_error(x_out, t_out))
-        loss_adv = lam2*F.sum(F.softplus(-y_out)) / norm
-        loss = loss_rec + loss_adv
-        chainer.report({'loss': loss}, dec)
+        loss = (loss_rec + loss_adv) / (lam1 + lam2)
+        chainer.report({'loss': loss}, opt)
         return loss
         
         
@@ -50,49 +42,28 @@ class FacadeUpdater(chainer.training.StandardUpdater):
         L1 = a*F.sum(F.softplus(-y_in)) / len(y_in) 
         L2 = b*F.sum(F.softplus(y_out)) /len(y_out)
 
-        loss = L1 + L2
+        loss = (L1 + L2) / (a+b)
         chainer.report({'loss': loss}, dis)
         return loss
 
     def check_dis(self, y_in, y_out):
 
-        acc_real = np.mean(y_in.data) 
-        acc_fake = np.mean(y_out.data)
+        real = np.mean(y_in.data) 
+        fake = np.mean(y_out.data)
 
-        print("ACC R {} | F {} ".format(acc_real, acc_fake))
+        print("ACC R {} | F {} ".format(real, fake))
 
-        # early on, the dis should start polarizing
-        c0 = acc_real > 0.0 and acc_fake < 0.0
-
-        # The dis should know more about reals than fakes
-        c1 = acc_real > abs(acc_fake)
-
-        # The dis has forgotten what is fake
-        c2 = acc_real > 5.0 and acc_fake > 0.0
+        # c0 = real < abs(fake)
+        c1 = fake > 0.0 or real < 0.0
+        c2 = fake < -10.0 # and not c0
         
-        # Dis is too far ahead
-        c3 = abs(acc_fake)  > 5.0 and c0 and c1
-        # if c0 and c1:
-        #     return True, True
+        print(c1,c2)
 
-        # # elif c2:
-        # #     return False, True
+        update_dis = c1 and not c2
+        update_gen =  c2
 
-        # elif c3:
-        #     return False, True
-        # else:
-        #     return True, False
-        # d_check = acc_real < high  # and real_check
-        # g_check = acc_fake > low #and acc_real.data > low
-        # # return acc_fake.data < high , acc_fake.data > low
-
-        # if not any([d_check, g_check]):
-        #     print("BOTH GEN AND DIS ARE FAILING")
-        #     return (True, True)
-        # else:
-        #     # return d_check, g_check
-        
-        return True, True 
+        # return update_dis, update_gen 
+        return True, True
 
     def update_core(self):        
         enc_optimizer = self.get_optimizer('enc')
@@ -134,11 +105,11 @@ class FacadeUpdater(chainer.training.StandardUpdater):
             update_dis, update_gen = self.check_dis(y_real, y_fake)
 
             if update_gen:
-                enc_optimizer.update(self.loss_enc, enc, x_out, t_out, y_fake)
+                enc_optimizer.update(self.loss_gen, enc, x_out, t_out, y_fake)
                 for z_ in z:
                     z_.unchain_backward()
                
-                dec_optimizer.update(self.loss_dec, dec, x_out, t_out, y_fake)
+                dec_optimizer.update(self.loss_gen, dec, x_out, t_out, y_fake)
             else:
                 print("Not updating gen")
             

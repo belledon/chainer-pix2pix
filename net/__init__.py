@@ -1,3 +1,2 @@
-from net import pixtopix
-from net import pixtovoxel
-from net import voxeltovoxel
+from net import gan
+from net import cgan

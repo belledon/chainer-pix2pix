@@ -14,12 +14,11 @@ from chainer import serializers
 
 import fileFuncs as ff
 import data
-import net
 
+import configuration
 
-archs = {   "voxel-voxel" : net.voxeltovoxel,
-            "pix-voxel" : net.pixtovoxel,
-        }
+archs = configuration.archs
+optimizers = configuration.optimizers
 
 def iou(a, b):
    
@@ -119,7 +118,7 @@ def main():
     # Set up a neural network to test
 
 
-    arch = archs[args.arch]
+    arch, _, _ = archs[args.arch]
     enc = arch.Encoder()
     dec = arch.Decoder()
     # dis = arch.Discriminator()

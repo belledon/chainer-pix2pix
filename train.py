@@ -15,16 +15,26 @@ from chainer import serializers
 import fileFuncs as ff 
 
 import data
-import net
-import updater
 
-archs = {   "voxel-voxel" : (net.voxeltovoxel, updater.cgan, True),
-            "pix-voxel" : (net.pixtovoxel, updater.gan, False),
-        }
+import configuration
 
-optimizers = {  "adam" : chainer.optimizers.Adam,
-                "sgd" : chainer.optimizers.SGD
-             }
+archs = configuration.archs
+optimizers = configuration.optimizers
+
+def make_optimizer(model, lr, optimizer):
+        optimizer = optimizer(lr)
+        optimizer.setup(model)
+        optimizer.add_hook(chainer.optimizer.WeightDecay(0.000001), 'hook_dec')
+        return optimizer
+
+
+def adjust_learning_rate(opt):
+    @training.make_extension()
+    def adjust_lr(trainer):
+        optimizer = trainer.updater.get_optimizer(opt)
+        optimizer.hyperparam.lr = 0.01 / optimizer.t
+
+    return adjust_lr
 
 def main():
     parser = argparse.ArgumentParser(description='chainer implementation of pix2pix')
@@ -84,11 +94,17 @@ def main():
     parser.add_argument('--synset_id', '-sid', type = int,
         help = "Index of synset")
 
-    parser.add_argument("--lams", '-l', type = int, default = 100,
-        help = "Weights to apply to generator loss. Default (100, 1)")
+    parser.add_argument("--lam1", '-l1', type = int, default = 100,
+        help = "Weights from l2 reconstruction for generator loss. Default 100")
 
-    parser.add_argument("-opt", "--optimizer", type = str, choices = optimizers.keys(),
-        default = "sgd", help = "Optimizer to train network. Default sgd")
+    parser.add_argument("--lam2", '-l2', type = int, default = 1,
+        help = "Weights from adversarial loos for generator loss. Default 1")
+
+    parser.add_argument("--gen_opt", "-go", type = str, choices = optimizers.keys(),
+        default = "sgd", help = "Optimizer to train generator. Default sgd")
+
+    parser.add_argument("--dis_opt", "-do", type = str, choices = optimizers.keys(),
+        default = "sgd", help = "Optimizer to train discriminator. Default sgd")
 
     parser.add_argument("--gen_learn", "-gl", type = float, default = 2.0E-4,
         help = "Generator learning rate")
@@ -107,9 +123,10 @@ def main():
     print("Image size : 1x{0:d}x{0:d}".format(args.image))
     print("Rotating: {} [0: No, 1: Yes]".format(args.rot))
     print("##### Training #####")
-    print("OPTIMIZER : {}".format(args.optimizer))
-    print("LAM1 : {}".format(args.lams))
-    print("LAM2 : 1")
+    print("GEN OPTIMIZER : {}".format(args.gen_opt))
+    print("DIS_OPTIMIZER : {}".format(args.dis_opt))
+    print("LAM1 : {}".format(args.lam1))
+    print("LAM2 : {}".format(args.lam2))
     print("GEN_LR : {}".format(args.gen_learn))
     print("DIS_LR: {}".format(args.dis_learn))
     print("Batchsize : {}".format(args.batchsize))
@@ -141,20 +158,15 @@ def main():
 
 
 
-    # Setup an optimizer
-    optimizer = optimizers[args.optimizer]
-    
-    def make_optimizer(model, lr, optimizer=optimizer):
-        optimizer = optimizer(lr)
-        optimizer.setup(model)
-        optimizer.add_hook(chainer.optimizer.WeightDecay(0.000001), 'hook_dec')
-        return optimizer
+    # Setup optimizers
+    gen_opt = optimizers[args.gen_opt]
+    dis_opt = optimizers[args.dis_opt]
 
-    opt_enc = make_optimizer(enc, args.gen_learn)
-    opt_dis = make_optimizer(dis, args.dis_learn)
-    opt_dec = make_optimizer(dec, args.gen_learn)
+    opt_enc = make_optimizer(enc, args.gen_learn, gen_opt)
+    opt_dis = make_optimizer(dis, args.dis_learn, gen_opt)
+    opt_dec = make_optimizer(dec, args.gen_learn, dis_opt)
 
-
+    # Setup dataset
     if args.synset_list is not None:
         assert(args.synset_id is not None)
         syn = (args.synset_list, args.synset_id)
@@ -175,7 +187,7 @@ def main():
 
 
     # Set up a trainer
-    up = arch_updater.FacadeUpdater(
+    up = arch_updater.Updater(
         models=(enc, dec, dis),
         iterator={
             'main': train_iter,
@@ -185,10 +197,18 @@ def main():
             'dis': opt_dis},
         device=args.gpu,
         iteration = args.resume,
-        lams = (args.lams, 1)
+        lams = (args.lam1, args.lam2)
         )
 
     trainer = training.Trainer(up, (args.epoch, 'epoch'), out=args.out)
+
+    # Add learning rate decay to sgd optimizers
+    if args.gen_opt == "sgd":
+        trainer.extend(adjust_learning_rate("enc"))
+        trainer.extend(adjust_learning_rate("dec"))
+    
+    if args.dis_opt == "sgd":
+        trainer.extend(adjust_learning_rate("dis"))
 
     snapshot_interval = (args.snapshot_interval, 'iteration')
     display_interval = (args.display_interval, 'iteration')
