@@ -84,6 +84,7 @@ class Updater(chainer.training.StandardUpdater):
         
         x_in = xp.zeros((batchsize, in_ch, w_in, w_in)).astype("f")
         t_out = xp.zeros((batchsize, out_ch, w_out, w_out, w_out)).astype("f")
+        x_out = xp.zeros((batchsize, out_ch, w_out, w_out, w_out)).astype("f")
 
         for i in range(batchsize):
             x_in[i,:] = xp.asarray(batch[i][0])
@@ -96,7 +97,10 @@ class Updater(chainer.training.StandardUpdater):
 
             # This will no longer work for pix-pix
             z = enc(x_in)
-            x_out = dec(z)
+            g_out = dec(z)
+            x_out[g_out.data > 0.5] = 1
+            x_out = Variable(x_out)
+
 
             y_fake = dis(x_out)
             y_real = dis(t_out)
@@ -105,11 +109,11 @@ class Updater(chainer.training.StandardUpdater):
             update_dis, update_gen = self.check_dis(y_real, y_fake)
 
             if update_gen:
-                enc_optimizer.update(self.loss_gen, enc, x_out, t_out, y_fake)
+                enc_optimizer.update(self.loss_gen, enc, g_out, t_out, y_fake)
                 for z_ in z:
                     z_.unchain_backward()
                
-                dec_optimizer.update(self.loss_gen, dec, x_out, t_out, y_fake)
+                dec_optimizer.update(self.loss_gen, dec, g_out, t_out, y_fake)
             else:
                 print("Not updating gen")
             
